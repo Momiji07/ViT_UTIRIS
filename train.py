@@ -8,8 +8,42 @@ from sklearn.metrics import roc_curve, auc
 from models.ViT import ViT
 from data.ImageLoad import ImageLoad
 
+def train(dataloader, model, loss_fn, optimizer):
+    size = len(dataloader.dataset)
+    model.train()
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+
+        # Compute prediction error
+        pred = model(X)
+        loss = loss_fn(pred, y)
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if batch % 100 == 0:
+            loss, current = loss.item(), batch * len(X)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+def test(dataloader, model, loss_fn):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    model.eval()
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        for X, y in dataloader:
+            X, y = X.to(device), y.to(device)
+            pred = model(X)
+            test_loss += loss_fn(pred, y).item()
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \\n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \\n")
+
 # データセットの読み込み
-train_dataloader, test_dataloader = ImageLoad("data/UTIRIS_V.1/RGB_Images/").load()
+train_dataloader, test_dataloader = ImageLoad("data/RGB_Images/").load()
 
 """ [input]
     - image_size (int) : 画像の縦の長さ（= 横の長さ）
@@ -28,7 +62,7 @@ net = ViT(
     image_width=256,
     patch_height=5,
     patch_width=16,
-    n_classes=10,
+    n_classes=79,
     dim=64,
     depth=6,
     n_heads=4,
@@ -39,48 +73,13 @@ net = ViT(
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 net.to(device)
 
-# 損失関数
-criterion = nn.CrossEntropyLoss()
-
-# 最適化手法
-optimizer = optim.Adam(net.parameters(), lr=0.001)
+loss_fn = nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(net.parameters(), lr=1e-3)
 
 # トレーニングループ
-num_epochs = 10
+num_epochs = 1
 for epoch in range(num_epochs):
-    for inputs, labels in train_dataloader:
-        inputs, labels = inputs.to(device), labels.to(device)
-
-        # 勾配の初期化
-        optimizer.zero_grad()
-
-        # 順伝播
-        outputs = net(inputs)
-        loss = criterion(outputs, labels)
-
-        # 逆伝播
-        loss.backward()
-        optimizer.step()
-
-# テストデータでの推定
-with torch.no_grad():
-    outputs = net(test_dataloader)
-    _, predicted = torch.max(outputs.data, 1)
-
-# FRRとEERの計算
-y_true = np.array(test_dataloader.dataset.targets)
-y_pred = np.array(predicted.cpu())
-
-# FRRの計算
-frr = 1 - accuracy_score(y_true, y_pred)
-
-# EERの計算
-fpr, tpr, thresholds = roc_curve(y_true, y_pred)
-eer = 1 - np.max(0.5 * (np.abs(tpr - fpr) + np.abs(tpr - (1 - fpr))))
-
-# 混同行列の計算
-conf_matrix = confusion_matrix(y_true, y_pred)
-
-print(f"FRR: {frr}")
-print(f"EER: {eer}")
-print(f"Confusion Matrix: \n{conf_matrix}")
+  print(f"Epoch {epoch+1}\\n-------------------------------")
+  train(train_dataloader, net, loss_fn, optimizer)
+  test(test_dataloader, net, loss_fn)
+print("Done!")
